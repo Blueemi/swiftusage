@@ -210,8 +210,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         // from where they sat in the old size: half off the left edge, the first time the panel opens.
         panel.contentView?.layoutSubtreeIfNeeded()
 
-        // Before the panel takes key, so the popover's window can't take it from the panel and close it.
-        anchor.present(from: button)
+        // Before the panel takes key, so a fallback popover's window can't take it from the panel and close it.
+        anchor.present(panel, from: statusItem)
         panel.alphaValue = 0
         dimmer.alphaValue = 0
         dimmer.orderFrontRegardless()
@@ -368,29 +368,68 @@ private final class GlassPanel: NSPanel {
 }
 
 /// Keeps the menu bar's highlight behind the item while the panel is open. The menu bar is drawn by
-/// another process, and highlighting the item's button no longer reaches it: it draws the highlight
-/// while the item presents a menu or a popover. So an empty popover the person never sees is presented
-/// from the item for as long as the panel is open.
+/// another process, and highlighting the item's button doesn't reach it: it draws the highlight while
+/// the item presents content. AppKit tells the status item when a menu or a popover starts and stops
+/// being presented from it, and the panel is announced the same way, with nothing else on screen.
+/// Should a later macOS drop that, an empty popover the person never sees is presented instead.
 @MainActor
 private final class HighlightAnchor: NSObject, NSPopoverDelegate {
-    /// Called when the popover closes without `dismiss()`, when AppKit or the menu bar closes it.
+    /// Called when the menu bar ends the presentation itself, as when another of its items opens.
     var onDismissedBySystem: (() -> Void)?
-    private let popover = NSPopover()
+    private weak var item: NSStatusItem?
+    private var content: AnyObject?
+    private var popover: NSPopover?
     private var isDismissing = false
 
-    override init() {
-        super.init()
-        let content = NSViewController()
-        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-        popover.contentViewController = content
-        popover.contentSize = content.view.frame.size
-        popover.animates = false
-        popover.behavior = .applicationDefined
-        popover.delegate = self
+    private typealias WillPresent = @convention(c) (AnyObject, Selector, AnyObject, @escaping @convention(block) () -> Void) -> Void
+    private static let willPresent = NSSelectorFromString("_willPresentContent:cancellationHandler:")
+    private static let didPresent = NSSelectorFromString("_didPresentContent:")
+
+    /// Presents `content` from the item until `dismiss()`.
+    func present(_ content: AnyObject, from item: NSStatusItem) {
+        guard self.content == nil, let button = item.button else { return }
+        self.item = item
+        self.content = content
+        if item.responds(to: Self.willPresent), item.responds(to: Self.didPresent) {
+            let announce = unsafeBitCast(item.method(for: Self.willPresent), to: WillPresent.self)
+            announce(item, Self.willPresent, content) { [weak self] in
+                DispatchQueue.main.async { self?.cancelled() }
+            }
+        } else {
+            presentPopover(from: button)
+        }
     }
 
-    func present(from button: NSStatusBarButton) {
-        guard !popover.isShown else { return }
+    func dismiss() {
+        guard let content else { return }
+        self.content = nil
+        isDismissing = true
+        if let popover {
+            popover.close()
+        } else if let item {
+            _ = item.perform(Self.didPresent, with: content)
+        }
+        isDismissing = false
+    }
+
+    private func cancelled() {
+        guard content != nil, !isDismissing else { return }
+        onDismissedBySystem?()
+    }
+
+    private func presentPopover(from button: NSStatusBarButton) {
+        let popover = popover ?? {
+            let popover = NSPopover()
+            let view = NSViewController()
+            view.view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+            popover.contentViewController = view
+            popover.contentSize = view.view.frame.size
+            popover.animates = false
+            popover.behavior = .applicationDefined
+            popover.delegate = self
+            return popover
+        }()
+        self.popover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // Hidden in the same turn of the run loop it's shown in, so it's never drawn on screen.
         if let window = popover.contentViewController?.view.window {
@@ -399,15 +438,8 @@ private final class HighlightAnchor: NSObject, NSPopoverDelegate {
         }
     }
 
-    func dismiss() {
-        guard popover.isShown else { return }
-        isDismissing = true
-        popover.close()
-        isDismissing = false
-    }
-
     func popoverDidClose(_ notification: Notification) {
-        if !isDismissing { onDismissedBySystem?() }
+        cancelled()
     }
 }
 
