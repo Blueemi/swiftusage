@@ -22,19 +22,105 @@ struct CardTitle: View {
 struct StatTile: View {
     let label: String
     let systemImage: String
-    let value: String
+    private let value: String
+    private let count: (value: Double, style: CountingNumber.Style)?
+
+    /// A value shown as text, such as an hour or a model's name, which morphs when it changes.
+    init(label: String, systemImage: String, value: String) {
+        self.label = label
+        self.systemImage = systemImage
+        self.value = value
+        count = nil
+    }
+
+    /// A number, which counts to its new value when it changes; "–" while it's unknown.
+    init(label: String, systemImage: String, number: Double?, style: CountingNumber.Style) {
+        self.label = label
+        self.systemImage = systemImage
+        value = "–"
+        count = number.map { ($0, style) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             CardTitle(label, systemImage: systemImage)
-            MorphingText(value)
-                .font(.system(size: 23, weight: .semibold, design: .rounded))
-                .monospacedDigit()
+            Group {
+                if let count {
+                    CountingNumber(count.value, style: count.style)
+                        .transition(.opacity.animation(Theme.Motion.change))
+                } else {
+                    MorphingText(value)
+                        .transition(.opacity.animation(Theme.Motion.change))
+                }
+            }
+            .font(.system(size: 23, weight: .semibold, design: .rounded))
+            .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.Layout.modulePadding)
         .padding(.vertical, 13)
         .module(cornerRadius: Theme.Layout.tileRadius)
+    }
+}
+
+/// A number that counts from its old value to its new one when it changes, as switching range or
+/// provider does: 1,101 runs down to 534, 76.8M slides to 12.3M, landing with the selection pill.
+struct CountingNumber: View {
+    enum Style {
+        /// 1,234
+        case grouped
+        /// 41.2M
+        case compact
+        /// $12.34
+        case dollars
+
+        func format(_ value: Double) -> String {
+            switch self {
+            case .grouped: Format.grouped(Int(value.rounded()))
+            case .compact: Format.compact(Int64(value.rounded()))
+            case .dollars: Format.dollars(value)
+            }
+        }
+    }
+
+    let value: Double
+    let style: Style
+
+    init(_ value: Double, style: Style) {
+        self.value = value
+        self.style = style
+    }
+
+    var body: some View {
+        Counting(value: value, style: style)
+            // Its own curve, whatever animation the change came with.
+            .animation(Theme.Motion.change, value: value)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(style.format(value))
+    }
+}
+
+/// The number as it counts: SwiftUI steps `value` through the animation and the text is formatted
+/// again each frame.
+private struct Counting: View, Animatable {
+    var value: Double
+    let style: CountingNumber.Style
+
+    nonisolated var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // Holds a full line's height, as the morphing values do, so tiles stay level.
+            Text(" ")
+                .hidden()
+            Text(style.format(value))
+                .lineLimit(1)
+                .minimumScaleFactor(MorphingText.minimumScale)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
