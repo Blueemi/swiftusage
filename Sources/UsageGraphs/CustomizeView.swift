@@ -773,6 +773,9 @@ private struct ProviderMark: View {
 /// anywhere on it goes back, not only on the arrow. The title sits on the glass rather than bare on the
 /// screen, where it would be hard to read over a light window.
 /// like the footer's buttons. Its chevron nudges back as it's clicked.
+/// The arrow and the title are one piece of glass that answers the pointer and presses, so a click
+/// anywhere on it goes back, not only on the arrow. The title sits on the glass rather than bare on the
+/// screen, where it would be hard to read over a light window.
 private struct BackButton: View {
     let action: () -> Void
     @State private var clicks = 0
