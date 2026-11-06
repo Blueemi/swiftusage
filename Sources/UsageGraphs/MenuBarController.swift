@@ -37,6 +37,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         super.init()
 
         followSelectedProvider()
+        chooseProviders()
         preferences.onProvidersChange = { [weak self] in
             guard let self else { return }
             // After the switch's own animation, so recounting doesn't take frames from it, and once for
@@ -119,6 +120,23 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     /// A provider that's turned off can't stay selected; the panel goes back to all of them.
     private func followSelectedProvider() {
         if let provider = state.provider, !preferences.isShown(provider) { state.provider = nil }
+    }
+
+    /// The first time, every provider is read, and once both the history and the limits have been, only
+    /// the providers that turned up either stay on: a tool's history, or an account signed in to it.
+    private func chooseProviders() {
+        guard preferences.isChoosingProviders else { return }
+        if store.hasLoaded, limits.lastFetched != nil {
+            let signedIn = limits.accounts.flatMap { [$0.provider] + $0.sharedWith }
+            preferences.keepOnly(found: store.providersWithData.union(signedIn))
+            return
+        }
+        withObservationTracking {
+            _ = store.hasLoaded
+            _ = limits.lastFetched
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.chooseProviders() }
+        }
     }
 
     /// Whether a point on screen is on the menu bar item, which takes clicks over the menu bar's whole
