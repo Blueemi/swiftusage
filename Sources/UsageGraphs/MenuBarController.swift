@@ -23,6 +23,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     private let state = PanelState()
     private let panel = GlassPanel()
     private let dimmer = DimmingWindow()
+    private let anchor = HighlightAnchor()
     private var monitors: [Any] = []
     private var isOpen = false
     private var hasPrewarmed = false
@@ -61,6 +62,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.cancel() }
         panel.onClickOutside = { [weak self] in self?.close() }
+        // The menu bar can end the presentation itself, which closes the popover; the panel goes with it.
+        anchor.onDismissedBySystem = { [weak self] in self?.close() }
 
         if let button = statusItem.button {
             button.imagePosition = .imageLeading
@@ -207,6 +210,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         // from where they sat in the old size: half off the left edge, the first time the panel opens.
         panel.contentView?.layoutSubtreeIfNeeded()
 
+        // Before the panel takes key, so the popover's window can't take it from the panel and close it.
+        anchor.present(from: button)
         panel.alphaValue = 0
         dimmer.alphaValue = 0
         dimmer.orderFrontRegardless()
@@ -218,8 +223,6 @@ final class MenuBarController: NSObject, NSWindowDelegate {
             panel.animator().alphaValue = 1
             dimmer.animator().alphaValue = 1
         }
-        // After the mouse-down that opened the panel, which would otherwise clear it.
-        DispatchQueue.main.async { button.highlight(true) }
 
         // Clicks in other apps, including the menu bar. Clicks there that switch apps also resign key.
         // Clicks on the item come here too, being in the menu bar; its own action closes the panel.
@@ -239,7 +242,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         isOpen = false
         monitors.forEach(NSEvent.removeMonitor)
         monitors.removeAll()
-        statusItem.button?.highlight(false)
+        anchor.dismiss()
 
         withAnimation(Theme.Motion.close) { presentation.isPresented = false }
         NSAnimationContext.runAnimationGroup { context in
@@ -361,6 +364,50 @@ private final class GlassPanel: NSPanel {
             }
         }
         super.sendEvent(event)
+    }
+}
+
+/// Keeps the menu bar's highlight behind the item while the panel is open. The menu bar is drawn by
+/// another process, and highlighting the item's button no longer reaches it: it draws the highlight
+/// while the item presents a menu or a popover. So an empty popover the person never sees is presented
+/// from the item for as long as the panel is open.
+@MainActor
+private final class HighlightAnchor: NSObject, NSPopoverDelegate {
+    /// Called when the popover closes without `dismiss()`, when AppKit or the menu bar closes it.
+    var onDismissedBySystem: (() -> Void)?
+    private let popover = NSPopover()
+    private var isDismissing = false
+
+    override init() {
+        super.init()
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        popover.contentViewController = content
+        popover.contentSize = content.view.frame.size
+        popover.animates = false
+        popover.behavior = .applicationDefined
+        popover.delegate = self
+    }
+
+    func present(from button: NSStatusBarButton) {
+        guard !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Hidden in the same turn of the run loop it's shown in, so it's never drawn on screen.
+        if let window = popover.contentViewController?.view.window {
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
+        }
+    }
+
+    func dismiss() {
+        guard popover.isShown else { return }
+        isDismissing = true
+        popover.close()
+        isDismissing = false
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        if !isDismissing { onDismissedBySystem?() }
     }
 }
 
