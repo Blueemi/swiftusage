@@ -26,6 +26,10 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     private let anchor = HighlightAnchor()
     private var monitors: [Any] = []
     private var isOpen = false
+    /// Whether the open panel has reached the screen and started fading in.
+    private var isRevealed = false
+    /// Counts openings, so a fallback meant for one doesn't reveal the next.
+    private var openings = 0
     private var hasPrewarmed = false
     /// Rereads after providers are turned on or off, once a quick run of switches has settled.
     private var providersWork: Task<Void, Never>?
@@ -65,6 +69,12 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         panel.onClickOutside = { [weak self] in self?.close() }
         // The menu bar can end the presentation itself, which closes the popover; the panel goes with it.
         anchor.onDismissedBySystem = { [weak self] in self?.close() }
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.panel.occlusionState.contains(.visible) else { return }
+                self.reveal()
+            }
+        }
 
         if let button = statusItem.button {
             button.imagePosition = .imageLeading
@@ -228,18 +238,27 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         // from where they sat in the old size: half off the left edge, the first time the panel opens.
         panel.contentView?.layoutSubtreeIfNeeded()
 
-        // Before the panel takes key, so a fallback popover's window can't take it from the panel and close it.
+        // The menu bar takes about as long to light the item up as the panel's first frame takes to reach
+        // the screen, so asked now, the highlight comes with that frame. Before the panel takes key, so a
+        // fallback popover's window can't take it from the panel and close it.
         anchor.present(panel, from: statusItem)
+        // Ordered in clear, with the fade and the modules' drop waiting for the panel to be on screen:
+        // started now, the fade would be partly over before anyone saw it.
+        isRevealed = false
         panel.alphaValue = 0
         dimmer.alphaValue = 0
         dimmer.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
-        withAnimation(Theme.Motion.open) { presentation.isPresented = true }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Theme.Motion.fadeIn
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-            dimmer.animator().alphaValue = 1
+        openings += 1
+        let opening = openings
+        if panel.occlusionState.contains(.visible) {
+            reveal()
+        } else {
+            // In case the window server never says so; only for this opening, not one after it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, self.openings == opening else { return }
+                self.reveal()
+            }
         }
 
         // Clicks in other apps, including the menu bar. Clicks there that switch apps also resign key.
@@ -255,12 +274,24 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Starts the panel's fade and the modules' drop once the panel is on screen.
+    private func reveal() {
+        guard isOpen, !isRevealed else { return }
+        isRevealed = true
+        withAnimation(Theme.Motion.open) { presentation.isPresented = true }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Theme.Motion.fadeIn
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            dimmer.animator().alphaValue = 1
+        }
+    }
+
     private func close() {
         guard isOpen else { return }
         isOpen = false
         monitors.forEach(NSEvent.removeMonitor)
         monitors.removeAll()
-        anchor.dismiss()
 
         withAnimation(Theme.Motion.close) { presentation.isPresented = false }
         NSAnimationContext.runAnimationGroup { context in
@@ -271,6 +302,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.isOpen else { return }
+                // The highlight goes with the panel's last frame, as it came with its first.
+                self.anchor.dismiss()
                 self.panel.orderOut(nil)
                 self.dimmer.orderOut(nil)
                 self.store.panelClosed()
