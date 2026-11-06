@@ -230,6 +230,11 @@ struct MenuBarContent {
         return showsLeft ? max(0, 100 - Int((used - 1e-6).rounded(.up))) : Int((used + 1e-6).rounded(.down))
     }
 
+    /// `58%`, a limit as the menu bar and Customize's preview of it show it.
+    func percentText(_ meter: LimitMeter) -> String {
+        "\(percent(meter))%"
+    }
+
     /// `Session 58%`, or `Session 42% left`.
     func describe(_ meter: LimitMeter) -> String {
         showsLeft ? "\(meter.label) \(percent(meter))% left" : "\(meter.label) \(LimitText.used(meter))"
@@ -267,7 +272,7 @@ enum MenuBarStrip {
             if let logo = ProviderLogo.template(group.account.provider) { pieces += [.logo(logo), .gap(4)] }
             for (offset, meter) in group.meters.enumerated() {
                 if offset > 0 { pieces.append(.text("·", dot)) }
-                pieces.append(.text(String(content.percent(meter)), numbers))
+                pieces.append(.text(content.percentText(meter), numbers))
             }
         }
 

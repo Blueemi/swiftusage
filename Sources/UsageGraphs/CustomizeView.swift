@@ -399,9 +399,8 @@ private struct MenuBarReplica: View {
                             if offset > 0 {
                                 Text("·").opacity(0.45)
                             }
-                            let percent = content.percent(meter)
-                            Text("\(percent)")
-                                .contentTransition(.numericText(value: Double(percent)))
+                            Text(content.percentText(meter))
+                                .contentTransition(.numericText(value: Double(content.percent(meter))))
                         }
                     }
                     .font(.system(size: size, weight: .semibold, design: .rounded))
