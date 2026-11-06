@@ -160,11 +160,83 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     /// the panel may have lost key to it and closed. While the panel is still fading out, the click is
     /// the one that closed it.
     @objc private func toggle() {
+        // A right-click or Control-click opens the item's menu instead.
+        if let event = NSApp.currentEvent,
+           event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.control)) {
+            showMenu()
+            return
+        }
         if isOpen {
             close()
         } else if !panel.isVisible {
             open()
         }
+    }
+
+    // MARK: - The item's menu
+
+    /// What a right-click on the item offers: what's wanted without opening the panel. The rest stays in
+    /// the panel's ⋯ menu, and the two share their actions. A native menu, so the menu bar lights the
+    /// item up behind it as it does for its own.
+    @objc private func showMenu() {
+        close()
+        LoginItem.shared.reload()
+        let menu = NSMenu()
+        menu.addItem(item("Refresh Now", #selector(refreshNow), key: "r"))
+        menu.addItem(.separator())
+        menu.addItem(item("Customize…", #selector(openCustomize), key: ","))
+        let login = item("Open at Login", #selector(toggleOpenAtLogin))
+        login.state = LoginItem.shared.isEnabled ? .on : .off
+        menu.addItem(login)
+        if Updater.shared.canUpdate {
+            let title = Updater.shared.offered.map { "Update to SwiftUsage \($0.version)…" } ?? "Check for Updates…"
+            menu.addItem(item(title, #selector(checkForUpdates)))
+        }
+        menu.addItem(.separator())
+        menu.addItem(item("About SwiftUsage", #selector(showAbout)))
+        menu.addItem(item("Quit SwiftUsage", #selector(quit), key: "q"))
+        // Shown the way a status item shows its own menu, which also gives it the menu bar's highlight;
+        // the click returns once the menu closes. Taken away again so a left-click opens the panel.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    /// As the panel's refresh button: history and limits read again.
+    @objc private func refreshNow() {
+        Task {
+            async let usage: Void = store.refresh()
+            async let plans: Void = limits.refresh(force: true)
+            _ = await (usage, plans)
+        }
+    }
+
+    /// Opens the panel on Customize.
+    @objc private func openCustomize() {
+        state.customizing = state.customizing ?? .providers
+        show()
+    }
+
+    @objc private func toggleOpenAtLogin() {
+        LoginItem.shared.set(!LoginItem.shared.isEnabled)
+    }
+
+    @objc private func checkForUpdates() {
+        Updater.shared.checkNow()
+    }
+
+    @objc private func showAbout() {
+        AboutPanel.show()
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
     }
 
     /// Escape leaves Customize first, then closes the panel.
