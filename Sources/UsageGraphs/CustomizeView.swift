@@ -17,16 +17,7 @@ struct CustomizeView: View {
         VStack(spacing: Theme.Layout.spacing) {
             GlassEffectContainer(spacing: 0) {
                 HStack(spacing: 10) {
-                    // The title shares the back button's glass rather than sitting bare on the screen,
-                    // where it would be hard to read over a light window.
-                    HStack(spacing: 8) {
-                        BackButton { state.customizing = nil }
-                        Text("Customize")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .padding(4)
-                    .padding(.trailing, 10)
-                    .glassEffect(.regular, in: .capsule)
+                    BackButton { state.customizing = nil }
                     Spacer()
                     GlassSegmentedControl("Section", selection: Binding(get: { section }, set: { state.customizing = $0 }),
                                           options: CustomizeSection.allCases, title: \.rawValue)
@@ -778,6 +769,9 @@ private struct ProviderMark: View {
 }
 
 /// The back button at the start of Customize's title capsule, a circle that brightens under the pointer
+/// The arrow and the title are one piece of glass that answers the pointer and presses, so a click
+/// anywhere on it goes back, not only on the arrow. The title sits on the glass rather than bare on the
+/// screen, where it would be hard to read over a light window.
 /// like the footer's buttons. Its chevron nudges back as it's clicked.
 private struct BackButton: View {
     let action: () -> Void
@@ -788,10 +782,20 @@ private struct BackButton: View {
             clicks += 1
             withAnimation(Theme.Motion.select) { action() }
         } label: {
-            CircleIcon(systemImage: "chevron.left", size: 28)
-                .symbolEffect(.wiggle.backward, value: clicks)
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .symbolEffect(.wiggle.backward, value: clicks)
+                Text("Customize")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .padding(.leading, 13)
+            .padding(.trailing, 16)
+            .frame(height: 36)
+            .contentShape(.capsule)
+            .glassEffect(.regular.interactive(), in: .capsule)
         }
-        .buttonStyle(PressScale(scale: 0.88))
+        .buttonStyle(BareButton())
         .help("Back")
         .accessibilityLabel("Back")
     }
