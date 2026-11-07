@@ -23,7 +23,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     private let state = PanelState()
     private let panel = GlassPanel()
     private let dimmer = DimmingWindow()
-    private let anchor = HighlightAnchor()
+    private let highlight = ItemHighlight()
     private var monitors: [Any] = []
     private var isOpen = false
     /// Whether the open panel has reached the screen and started fading in.
@@ -67,8 +67,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.cancel() }
         panel.onClickOutside = { [weak self] in self?.close() }
-        // The menu bar can end the presentation itself, which closes the popover; the panel goes with it.
-        anchor.onDismissedBySystem = { [weak self] in self?.close() }
+        // The menu bar can end the presentation itself, as when another of its items opens; the panel goes with it.
+        highlight.onDismissedBySystem = { [weak self] in self?.close() }
         NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.panel.occlusionState.contains(.visible) else { return }
@@ -313,7 +313,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         // The menu bar takes about as long to light the item up as the panel's first frame takes to reach
         // the screen, so asked now, the highlight comes with that frame. Before the panel takes key, so a
         // fallback popover's window can't take it from the panel and close it.
-        anchor.present(panel, from: statusItem)
+        highlight.present(panel, from: statusItem)
         // Ordered in clear, with the fade and the modules' drop waiting for the panel to be on screen:
         // started now, the fade would be partly over before anyone saw it.
         isRevealed = false
@@ -375,7 +375,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
             MainActor.assumeIsolated {
                 guard let self, !self.isOpen else { return }
                 // The highlight goes with the panel's last frame, as it came with its first.
-                self.anchor.dismiss()
+                self.highlight.dismiss()
                 self.panel.orderOut(nil)
                 self.dimmer.orderOut(nil)
                 self.store.panelClosed()
@@ -496,7 +496,7 @@ private final class GlassPanel: NSPanel {
 /// being presented from it, and the panel is announced the same way, with nothing else on screen.
 /// Should a later macOS drop that, an empty popover the person never sees is presented instead.
 @MainActor
-private final class HighlightAnchor: NSObject, NSPopoverDelegate {
+private final class ItemHighlight: NSObject, NSPopoverDelegate {
     /// Called when the menu bar ends the presentation itself, as when another of its items opens.
     var onDismissedBySystem: (() -> Void)?
     private weak var item: NSStatusItem?
