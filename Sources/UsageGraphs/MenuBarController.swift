@@ -23,8 +23,13 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     private let state = PanelState()
     private let panel = GlassPanel()
     private let dimmer = DimmingWindow()
+    private let highlight = ItemHighlight()
     private var monitors: [Any] = []
     private var isOpen = false
+    /// Whether the open panel has reached the screen and started fading in.
+    private var isRevealed = false
+    /// Counts openings, so a fallback meant for one doesn't reveal the next.
+    private var openings = 0
     private var hasPrewarmed = false
     /// Rereads after providers are turned on or off, once a quick run of switches has settled.
     private var providersWork: Task<Void, Never>?
@@ -36,6 +41,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         super.init()
 
         followSelectedProvider()
+        chooseProviders()
         preferences.onProvidersChange = { [weak self] in
             guard let self else { return }
             // After the switch's own animation, so recounting doesn't take frames from it, and once for
@@ -61,6 +67,14 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.cancel() }
         panel.onClickOutside = { [weak self] in self?.close() }
+        // The menu bar can end the presentation itself, as when another of its items opens; the panel goes with it.
+        highlight.onDismissedBySystem = { [weak self] in self?.close() }
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.panel.occlusionState.contains(.visible) else { return }
+                self.reveal()
+            }
+        }
 
         if let button = statusItem.button {
             button.imagePosition = .imageLeading
@@ -118,6 +132,23 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         if let provider = state.provider, !preferences.isShown(provider) { state.provider = nil }
     }
 
+    /// The first time, every provider is read, and once both the history and the limits have been, only
+    /// the providers that turned up either stay on: a tool's history, or an account signed in to it.
+    private func chooseProviders() {
+        guard preferences.isChoosingProviders else { return }
+        if store.hasLoaded, limits.lastFetched != nil {
+            let signedIn = limits.accounts.flatMap { [$0.provider] + $0.sharedWith }
+            preferences.keepOnly(found: store.providersWithData.union(signedIn))
+            return
+        }
+        withObservationTracking {
+            _ = store.hasLoaded
+            _ = limits.lastFetched
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.chooseProviders() }
+        }
+    }
+
     /// Whether a point on screen is on the menu bar item, which takes clicks over the menu bar's whole
     /// height, up to the edge of the screen.
     private func isOnItem(_ point: NSPoint) -> Bool {
@@ -129,11 +160,83 @@ final class MenuBarController: NSObject, NSWindowDelegate {
     /// the panel may have lost key to it and closed. While the panel is still fading out, the click is
     /// the one that closed it.
     @objc private func toggle() {
+        // A right-click or Control-click opens the item's menu instead.
+        if let event = NSApp.currentEvent,
+           event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.control)) {
+            showMenu()
+            return
+        }
         if isOpen {
             close()
         } else if !panel.isVisible {
             open()
         }
+    }
+
+    // MARK: - The item's menu
+
+    /// What a right-click on the item offers: what's wanted without opening the panel. The rest stays in
+    /// the panel's ⋯ menu, and the two share their actions. A native menu, so the menu bar lights the
+    /// item up behind it as it does for its own.
+    @objc private func showMenu() {
+        close()
+        LoginItem.shared.reload()
+        let menu = NSMenu()
+        menu.addItem(item("Refresh Now", #selector(refreshNow), key: "r"))
+        menu.addItem(.separator())
+        menu.addItem(item("Customize…", #selector(openCustomize), key: ","))
+        let login = item("Open at Login", #selector(toggleOpenAtLogin))
+        login.state = LoginItem.shared.isEnabled ? .on : .off
+        menu.addItem(login)
+        if Updater.shared.canUpdate {
+            let title = Updater.shared.offered.map { "Update to SwiftUsage \($0.version)…" } ?? "Check for Updates…"
+            menu.addItem(item(title, #selector(checkForUpdates)))
+        }
+        menu.addItem(.separator())
+        menu.addItem(item("About SwiftUsage", #selector(showAbout)))
+        menu.addItem(item("Quit SwiftUsage", #selector(quit), key: "q"))
+        // Shown the way a status item shows its own menu, which also gives it the menu bar's highlight;
+        // the click returns once the menu closes. Taken away again so a left-click opens the panel.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    /// As the panel's refresh button: history and limits read again.
+    @objc private func refreshNow() {
+        Task {
+            async let usage: Void = store.refresh()
+            async let plans: Void = limits.refresh(force: true)
+            _ = await (usage, plans)
+        }
+    }
+
+    /// Opens the panel on Customize.
+    @objc private func openCustomize() {
+        state.customizing = state.customizing ?? .providers
+        show()
+    }
+
+    @objc private func toggleOpenAtLogin() {
+        LoginItem.shared.set(!LoginItem.shared.isEnabled)
+    }
+
+    @objc private func checkForUpdates() {
+        Updater.shared.checkNow()
+    }
+
+    @objc private func showAbout() {
+        AboutPanel.show()
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
     }
 
     /// Escape leaves Customize first, then closes the panel.
@@ -207,19 +310,28 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         // from where they sat in the old size: half off the left edge, the first time the panel opens.
         panel.contentView?.layoutSubtreeIfNeeded()
 
+        // The menu bar takes about as long to light the item up as the panel's first frame takes to reach
+        // the screen, so asked now, the highlight comes with that frame. Before the panel takes key, so a
+        // fallback popover's window can't take it from the panel and close it.
+        highlight.present(panel, from: statusItem)
+        // Ordered in clear, with the fade and the modules' drop waiting for the panel to be on screen:
+        // started now, the fade would be partly over before anyone saw it.
+        isRevealed = false
         panel.alphaValue = 0
         dimmer.alphaValue = 0
         dimmer.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
-        withAnimation(Theme.Motion.open) { presentation.isPresented = true }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Theme.Motion.fadeIn
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-            dimmer.animator().alphaValue = 1
+        openings += 1
+        let opening = openings
+        if panel.occlusionState.contains(.visible) {
+            reveal()
+        } else {
+            // In case the window server never says so; only for this opening, not one after it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, self.openings == opening else { return }
+                self.reveal()
+            }
         }
-        // After the mouse-down that opened the panel, which would otherwise clear it.
-        DispatchQueue.main.async { button.highlight(true) }
 
         // Clicks in other apps, including the menu bar. Clicks there that switch apps also resign key.
         // Clicks on the item come here too, being in the menu bar; its own action closes the panel.
@@ -234,12 +346,24 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Starts the panel's fade and the modules' drop once the panel is on screen.
+    private func reveal() {
+        guard isOpen, !isRevealed else { return }
+        isRevealed = true
+        withAnimation(Theme.Motion.open) { presentation.isPresented = true }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Theme.Motion.fadeIn
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            dimmer.animator().alphaValue = 1
+        }
+    }
+
     private func close() {
         guard isOpen else { return }
         isOpen = false
         monitors.forEach(NSEvent.removeMonitor)
         monitors.removeAll()
-        statusItem.button?.highlight(false)
 
         withAnimation(Theme.Motion.close) { presentation.isPresented = false }
         NSAnimationContext.runAnimationGroup { context in
@@ -250,6 +374,8 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.isOpen else { return }
+                // The highlight goes with the panel's last frame, as it came with its first.
+                self.highlight.dismiss()
                 self.panel.orderOut(nil)
                 self.dimmer.orderOut(nil)
                 self.store.panelClosed()
@@ -361,6 +487,82 @@ private final class GlassPanel: NSPanel {
             }
         }
         super.sendEvent(event)
+    }
+}
+
+/// Keeps the menu bar's highlight behind the item while the panel is open. The menu bar is drawn by
+/// another process, and highlighting the item's button doesn't reach it: it draws the highlight while
+/// the item presents content. AppKit tells the status item when a menu or a popover starts and stops
+/// being presented from it, and the panel is announced the same way, with nothing else on screen.
+/// Should a later macOS drop that, an empty popover the person never sees is presented instead.
+@MainActor
+private final class ItemHighlight: NSObject, NSPopoverDelegate {
+    /// Called when the menu bar ends the presentation itself, as when another of its items opens.
+    var onDismissedBySystem: (() -> Void)?
+    private weak var item: NSStatusItem?
+    private var content: AnyObject?
+    private var popover: NSPopover?
+    private var isDismissing = false
+
+    private typealias WillPresent = @convention(c) (AnyObject, Selector, AnyObject, @escaping @convention(block) () -> Void) -> Void
+    private static let willPresent = NSSelectorFromString("_willPresentContent:cancellationHandler:")
+    private static let didPresent = NSSelectorFromString("_didPresentContent:")
+
+    /// Presents `content` from the item until `dismiss()`.
+    func present(_ content: AnyObject, from item: NSStatusItem) {
+        guard self.content == nil, let button = item.button else { return }
+        self.item = item
+        self.content = content
+        if item.responds(to: Self.willPresent), item.responds(to: Self.didPresent) {
+            let announce = unsafeBitCast(item.method(for: Self.willPresent), to: WillPresent.self)
+            announce(item, Self.willPresent, content) { [weak self] in
+                DispatchQueue.main.async { self?.cancelled() }
+            }
+        } else {
+            presentPopover(from: button)
+        }
+    }
+
+    func dismiss() {
+        guard let content else { return }
+        self.content = nil
+        isDismissing = true
+        if let popover {
+            popover.close()
+        } else if let item {
+            _ = item.perform(Self.didPresent, with: content)
+        }
+        isDismissing = false
+    }
+
+    private func cancelled() {
+        guard content != nil, !isDismissing else { return }
+        onDismissedBySystem?()
+    }
+
+    private func presentPopover(from button: NSStatusBarButton) {
+        let popover = popover ?? {
+            let popover = NSPopover()
+            let view = NSViewController()
+            view.view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+            popover.contentViewController = view
+            popover.contentSize = view.view.frame.size
+            popover.animates = false
+            popover.behavior = .applicationDefined
+            popover.delegate = self
+            return popover
+        }()
+        self.popover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Hidden in the same turn of the run loop it's shown in, so it's never drawn on screen.
+        if let window = popover.contentViewController?.view.window {
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        cancelled()
     }
 }
 

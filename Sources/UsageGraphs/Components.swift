@@ -187,15 +187,14 @@ struct CrossfadeText: View {
     }
 }
 
-/// A capsule of glass holding a few choices, the selected one lifted out on a lighter pill that slides
-/// between them.
+/// A capsule of glass holding a few choices, the selected one lifted out on a drop of glass that slides
+/// between them, as the system's segmented controls do. The system's own control takes the accent color
+/// and has no glass under it in a panel, so it's drawn here.
 struct GlassSegmentedControl<Value: Hashable>: View {
     let label: String
     @Binding var selection: Value
     let options: [Value]
     let title: (Value) -> String
-
-    @Namespace private var namespace
 
     init(_ label: String, selection: Binding<Value>, options: [Value], title: @escaping (Value) -> String) {
         self.label = label
@@ -205,37 +204,68 @@ struct GlassSegmentedControl<Value: Hashable>: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.self) { option in
-                let selected = option == selection
-                Button {
-                    withAnimation(Theme.Motion.select) { selection = option }
-                } label: {
-                    Text(title(option))
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(selected ? .primary : .secondary)
-                        .padding(.horizontal, 13)
-                        .frame(height: 28)
-                        .background {
-                            if selected {
-                                Capsule()
-                                    .fill(.primary.opacity(0.16))
-                                    .matchedGeometryEffect(id: "selection", in: namespace)
-                            }
-                        }
-                        .contentShape(.capsule)
-                }
-                .buttonStyle(.plain)
+        GlassTrack(options: options, selection: selection) { option in
+            let selected = option == selection
+            Button {
+                withAnimation(Theme.Motion.select) { selection = option }
+            } label: {
+                Text(title(option))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .padding(.horizontal, 13)
+                    .frame(height: 28)
+                    .contentShape(.capsule)
             }
+            .buttonStyle(.plain)
         }
-        .padding(4)
-        .glassEffect(.regular, in: .capsule)
         .accessibilityRepresentation {
             Picker(label, selection: $selection) {
                 ForEach(options, id: \.self) { Text(title($0)).tag($0) }
             }
             .pickerStyle(.segmented)
         }
+    }
+}
+
+/// The capsule of glass a row of choices sits in, with the selected one lifted out on a drop of glass
+/// a little brighter than the track, sliding between them.
+///
+/// Glass in a container is drawn over the container's content, so the drop can't sit behind its own
+/// choice. It slides along a hidden copy of the row instead, in a container of its own (so it rises out
+/// of the track rather than merging into it and the glass around it), and the row the person sees lies
+/// on top, laid out the same.
+struct GlassTrack<Option: Hashable, Item: View>: View {
+    let options: [Option]
+    let selection: Option
+    @ViewBuilder let item: (Option) -> Item
+
+    @Namespace private var namespace
+
+    var body: some View {
+        ZStack {
+            GlassEffectContainer(spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(options, id: \.self) { option in
+                        item(option)
+                            .hidden()
+                            .background {
+                                if option == selection {
+                                    Capsule()
+                                        .fill(.clear)
+                                        .glassEffect(.regular.tint(.white.opacity(0.12)), in: .capsule)
+                                        .matchedGeometryEffect(id: "selection", in: namespace)
+                                }
+                            }
+                    }
+                }
+            }
+            .accessibilityHidden(true)
+            HStack(spacing: 0) {
+                ForEach(options, id: \.self) { item($0) }
+            }
+        }
+        .padding(4)
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -295,18 +325,11 @@ struct ProviderPicker: View {
     @Binding var selection: Provider?
     let providers: [Provider]
     let available: Set<Provider>
-
-    @Namespace private var namespace
     /// Counts clicks on each logo, which pop it.
     @State private var clicks: [Provider?: Int] = [:]
 
     var body: some View {
-        HStack(spacing: 0) {
-            item(nil)
-            ForEach(providers) { item($0) }
-        }
-        .padding(4)
-        .glassEffect(.regular, in: .capsule)
+        GlassTrack(options: [nil] + providers.map(Optional.some), selection: selection) { item($0) }
         .accessibilityRepresentation {
             Picker("Provider", selection: $selection) {
                 Text("All Providers").tag(Provider?.none)
@@ -340,13 +363,6 @@ struct ProviderPicker: View {
             .padding(.horizontal, selected ? 12 : 0)
             .frame(maxWidth: selected ? nil : .infinity)
             .frame(height: 28)
-            .background {
-                if selected {
-                    Capsule()
-                        .fill(.primary.opacity(0.16))
-                        .matchedGeometryEffect(id: "selection", in: namespace)
-                }
-            }
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)

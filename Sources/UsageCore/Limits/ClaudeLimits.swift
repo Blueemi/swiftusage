@@ -168,14 +168,17 @@ public struct ClaudeLimits: LimitsSource {
         return [LimitNote(id: "extra", label: "Extra usage", value: "\(Format.dollars(used)) spent")]
     }
 
-    /// `claude_max` and `default_claude_max_20x` → `Max 20x`; `team` and `default_claude_max_5x` → `Team 5x`.
+    /// `claude_max` and `default_claude_max_20x` → `Ultra`; `claude_max` and `default_claude_max_5x` → `Max`;
+    /// `team` and `default_claude_max_5x` → `Team 5x`.
     static func plan(_ type: String?, _ tier: String?) -> String? {
         guard var type = type?.lowercased(), !type.isEmpty else { return nil }
         if type.hasPrefix("claude_") { type.removeFirst(7) }
+        let multiple = tier.flatMap { tier in tier.range(of: "\\d+x", options: .regularExpression).map { String(tier[$0]) } }
+        // Anthropic renamed its plans on 30 October 2026: Max 20x is now Ultra, and Max 5x is just Max.
+        // Logins still report them as Max with a multiple.
+        if type == "max" { return multiple == "20x" ? "Ultra" : "Max" }
         var plan = type.titleCased
-        if let tier, let multiple = tier.range(of: "\\d+x", options: .regularExpression) {
-            plan += " " + tier[multiple]
-        }
+        if let multiple { plan += " " + multiple }
         return plan
     }
 

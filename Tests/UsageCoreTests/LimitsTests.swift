@@ -5,13 +5,24 @@ import Synchronization
 import Testing
 @testable import UsageCore
 
+/// Where `LimitsTests.remembered(_:)` puts its folders during one run of the tests. A global, so the
+/// cleanup registered with `atexit` can reach it without capturing anything.
+private let testsRememberedRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("swiftusage-tests-remembered-\(ProcessInfo.processInfo.processIdentifier)")
+
 struct LimitsTests {
     let now = Date(timeIntervalSince1970: Timestamp.parse("2026-10-19T16:00:00Z")!)
 
-    /// Sources that keep what they learn about logins in a folder of their own, not the app's.
+    /// Sources that keep what they learn about logins in a folder of their own, not the app's: one per
+    /// call, all in a folder removed when the tests finish.
     static func remembered(_ name: String) -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("swiftusage-tests-\(UUID().uuidString)/" + name)
+        rememberedRoot.appendingPathComponent(UUID().uuidString + "/" + name)
     }
+
+    private static let rememberedRoot: URL = {
+        atexit { try? FileManager.default.removeItem(at: testsRememberedRoot) }
+        return testsRememberedRoot
+    }()
 
     static func antigravity() -> AntigravityLimits { AntigravityLimits(emailsURL: remembered("antigravity-accounts.json")) }
     static func cursor(renewal: CursorRenewal = idleCursorRenewal) -> CursorLimits { CursorLimits(plansURL: remembered("cursor-plans.json"), renewal: renewal) }
@@ -53,7 +64,10 @@ struct LimitsTests {
     }
 
     @Test func claudePlansAndAccountNames() {
-        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_20x") == "Max 20x")
+        // Max 20x and Max 5x were renamed Ultra and Max.
+        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_20x") == "Ultra")
+        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_5x") == "Max")
+        #expect(ClaudeLimits.plan("claude_ultra", nil) == "Ultra")
         #expect(ClaudeLimits.plan("claude_team", "default_claude_max_5x") == "Team 5x")
         #expect(ClaudeLimits.plan("pro", "default_claude_ai") == "Pro")
         #expect(ClaudeLimits.plan(nil, "default_claude_max_5x") == nil)
