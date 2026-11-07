@@ -95,6 +95,12 @@ struct ParsingTests {
         #expect(ModelName.display("gpt-5.5-codex") == "GPT-5.5 Codex")
         #expect(ModelName.display("gpt-5-mini") == "GPT-5 Mini")
         #expect(ModelName.display("o4-mini") == "o4 Mini")
+        // OpenAI's snapshot dates are dropped, so a snapshot shares its model's row.
+        #expect(ModelName.display("gpt-5-2025-08-07") == "GPT-5")
+        #expect(ModelName.display("gpt-5-mini-2025-08-07") == "GPT-5 Mini")
+        #expect(ModelName.display("gpt-4.1-2025-04-14") == "GPT-4.1")
+        #expect(ModelName.display("gpt-4o-2024-08-06") == "GPT-4o")
+        #expect(ModelName.display("o3-2025-04-16") == "o3")
         #expect(ModelName.display("gemini-2-5-pro") == "Gemini 2.5 Pro")
         #expect(ModelName.display("gemini-3-pro-preview") == "Gemini 3 Pro Preview")
         #expect(ModelName.display("grok-code-fast-1") == "Grok Code Fast 1")
