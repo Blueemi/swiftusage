@@ -53,7 +53,10 @@ struct LimitsTests {
     }
 
     @Test func claudePlansAndAccountNames() {
-        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_20x") == "Max 20x")
+        // Max 20x and Max 5x were renamed Ultra and Max.
+        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_20x") == "Ultra")
+        #expect(ClaudeLimits.plan("claude_max", "default_claude_max_5x") == "Max")
+        #expect(ClaudeLimits.plan("claude_ultra", nil) == "Ultra")
         #expect(ClaudeLimits.plan("claude_team", "default_claude_max_5x") == "Team 5x")
         #expect(ClaudeLimits.plan("pro", "default_claude_ai") == "Pro")
         #expect(ClaudeLimits.plan(nil, "default_claude_max_5x") == nil)
