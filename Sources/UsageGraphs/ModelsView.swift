@@ -15,7 +15,7 @@ struct ModelsView: View {
                 ZStack {
                     TokenChart(data: data)
                         .id(contentID)
-                        .transition(.opacity.animation(Theme.Motion.change))
+                        .transition(.opacity)
                 }
                 .frame(minHeight: 90, maxHeight: .infinity)
             }
@@ -26,7 +26,7 @@ struct ModelsView: View {
                 ZStack {
                     modelList(colors: data.colors)
                         .id(contentID)
-                        .transition(.opacity.animation(Theme.Motion.change))
+                        .transition(.opacity)
                 }
                 // Five rows show at once; the chart above takes whatever height is left.
                 .frame(height: CGFloat(min(stats.models.count, 5)) * ModelRow.height + Self.listMargin * 2)

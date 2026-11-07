@@ -38,12 +38,12 @@ struct LimitsView: View {
     private var spend: some View {
         let spend = store.spend(for: provider)
         let counts = store.countsTokens(provider)
-        func value(_ dollars: Double?) -> Double? { counts ? dollars : nil }
+        func value(_ dollars: Double?) -> String { counts ? dollars.map(Format.dollars) ?? "–" : "–" }
         return Grid(horizontalSpacing: Theme.Layout.spacing) {
             GridRow {
-                StatTile(label: "Today", systemImage: "dollarsign.circle", number: value(spend?.today), style: .dollars)
-                StatTile(label: "Yesterday", systemImage: "clock.arrow.circlepath", number: value(spend?.yesterday), style: .dollars)
-                StatTile(label: "Last 30 days", systemImage: "calendar", number: value(spend?.month), style: .dollars)
+                StatTile(label: "Today", systemImage: "dollarsign.circle", value: value(spend?.today))
+                StatTile(label: "Yesterday", systemImage: "clock.arrow.circlepath", value: value(spend?.yesterday))
+                StatTile(label: "Last 30 days", systemImage: "calendar", value: value(spend?.month))
             }
         }
     }

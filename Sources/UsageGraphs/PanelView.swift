@@ -225,12 +225,12 @@ struct OverviewView: View {
         VStack(spacing: Theme.Layout.spacing) {
             Grid(horizontalSpacing: Theme.Layout.spacing, verticalSpacing: Theme.Layout.spacing) {
                 GridRow {
-                    StatTile(label: "Sessions", systemImage: "terminal", number: stats.map { Double($0.sessions) }, style: .grouped)
-                    StatTile(label: "Messages", systemImage: "text.bubble", number: stats.map { Double($0.messages) }, style: .grouped)
-                    StatTile(label: "Total tokens", systemImage: "number", number: countsTokens ? stats.map { Double($0.totalTokens) } : nil, style: .compact)
+                    StatTile(label: "Sessions", systemImage: "terminal", value: value { Format.grouped($0.sessions) })
+                    StatTile(label: "Messages", systemImage: "text.bubble", value: value { Format.grouped($0.messages) })
+                    StatTile(label: "Total tokens", systemImage: "number", value: countsTokens ? value { Format.compact($0.totalTokens) } : "–")
                 }
                 GridRow {
-                    StatTile(label: "Active days", systemImage: "calendar", number: stats.map { Double($0.activeDays) }, style: .grouped)
+                    StatTile(label: "Active days", systemImage: "calendar", value: value { Format.grouped($0.activeDays) })
                     StatTile(label: "Peak hour", systemImage: "clock", value: value { $0.peakHour.map(Format.hour) ?? "–" })
                     StatTile(label: "Favorite model", systemImage: "star", value: value { $0.favoriteModel?.name ?? "–" })
                 }
@@ -250,7 +250,7 @@ struct OverviewView: View {
                 if let stats {
                     HeatmapView(stats: stats)
                         .id(heatmapID)
-                        .transition(.opacity.animation(Theme.Motion.change))
+                        .transition(.opacity)
                 }
             }
             .frame(width: Theme.Layout.heatmapWidth, height: Theme.Layout.heatmapHeight)

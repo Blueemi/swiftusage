@@ -58,13 +58,9 @@ enum Theme {
         static let textOut = Animation.easeOut(duration: 0.09)
         /// A value's characters rolling into place: quick, settling with a bounce like a reel.
         static var roll: Animation { spring(duration: 0.5, bounce: 0.32) }
-        /// What a switch of tab, provider or range brings in: numbers counting to their new values and
-        /// graphs cross-fading. It takes as long as the selection pill's slide, so the content lands with
-        /// the pill, but settles without its overshoot, which would carry a count past its value and back.
-        static var change: Animation { spring(duration: 0.4, bounce: 0) }
-        /// A value's characters morphing into new ones in place, over the same time as `change`, the new
-        /// ones popping a little past full size before they settle.
-        static var morph: Animation { spring(duration: 0.4, bounce: 0.25) }
+        /// A value's characters morphing into new ones in place, the new ones popping a little past full
+        /// size before they settle.
+        static var morph: Animation { spring(duration: 0.45, bounce: 0.32) }
         /// New numbers arriving while the panel is open.
         static var data: Animation { spring(duration: 0.55, bounce: 0.28) }
         /// Pointer feedback: quick, with a little spring where something moves, like the heatmap's ring
