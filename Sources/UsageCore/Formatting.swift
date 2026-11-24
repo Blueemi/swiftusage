@@ -34,11 +34,17 @@ public enum ModelName {
         if name.hasPrefix("claude-") { name.removeFirst("claude-".count) }
 
         var parts = name.split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == " " }).map(String.init)
-        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) { parts.removeLast() }
-        // OpenAI's snapshots end in a date written with dashes (`gpt-5-2025-08-07`), as the price list reads them.
-        if parts.count > 3, isDate(parts.suffix(3)) { parts.removeLast(3) }
-        if parts.last == "latest" { parts.removeLast() }
-        while parts.count > 1, let last = parts.last, efforts.contains(last) { parts.removeLast() }
+        // Drop trailing dates (`20251001`, `2025-08-07`), `latest`, and reasoning effort in any order,
+        // as the price list does (`PriceList.trimmed`).
+        while parts.count > 1 {
+            if parts.count > 3, isDate(parts.suffix(3)) {
+                parts.removeLast(3)
+            } else if let last = parts.last, (last.count == 8 && last.allSatisfy(\.isNumber)) || last == "latest" || efforts.contains(last) {
+                parts.removeLast()
+            } else {
+                break
+            }
+        }
         guard !parts.isEmpty else { return id }
 
         if let familyIndex = parts.firstIndex(where: { claudeFamilies.contains($0) }) {
