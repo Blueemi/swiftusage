@@ -32,6 +32,11 @@ final class Preferences {
 
     init() {
         let defaults = UserDefaults.standard
+        // Only the app's very first run chooses providers, before it has ever opened. Kept until the
+        // choice is made, in case it quits first; settings from before this existed stay as they were.
+        if defaults.object(forKey: "hasOpened") == nil, defaults.object(forKey: "hiddenProviders") == nil {
+            defaults.set(true, forKey: "choosesProviders")
+        }
         hiddenProviders = Set((defaults.stringArray(forKey: "hiddenProviders") ?? []).compactMap(Provider.init(rawValue:)))
         let interval = defaults.double(forKey: "limitsInterval")
         limitsInterval = Self.limitsIntervals.contains(interval) ? interval : Self.defaultLimitsInterval
@@ -44,6 +49,25 @@ final class Preferences {
 
     func isShown(_ provider: Provider) -> Bool {
         !hiddenProviders.contains(provider)
+    }
+
+    /// Whether this is the first run, still with every provider on, and the person hasn't turned any
+    /// on or off in Customize since.
+    var isChoosingProviders: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.bool(forKey: "choosesProviders") && defaults.object(forKey: "hiddenProviders") == nil
+    }
+
+    /// Leaves on only the providers found on this Mac, the rest waiting in Customize. With none found,
+    /// every provider stays on. Either way the choice is made once: a tool installed later doesn't turn
+    /// the others off.
+    func keepOnly(found: Set<Provider>) {
+        let defaults = UserDefaults.standard
+        if isChoosingProviders, !found.isEmpty {
+            hiddenProviders = Set(Provider.allCases).subtracting(found)
+            defaults.set(hiddenProviders.map(\.rawValue).sorted(), forKey: "hiddenProviders")
+        }
+        defaults.removeObject(forKey: "choosesProviders")
     }
 
     /// Turns a provider on or off. The last one on stays on, so the panel always has something to show.
