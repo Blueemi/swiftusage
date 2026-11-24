@@ -34,9 +34,17 @@ public enum ModelName {
         if name.hasPrefix("claude-") { name.removeFirst("claude-".count) }
 
         var parts = name.split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == " " }).map(String.init)
-        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) { parts.removeLast() }
-        if parts.last == "latest" { parts.removeLast() }
-        while parts.count > 1, let last = parts.last, efforts.contains(last) { parts.removeLast() }
+        // Drop trailing dates (`20251001`, `2025-08-07`), `latest`, and reasoning effort in any order,
+        // as the price list does (`PriceList.trimmed`).
+        while parts.count > 1 {
+            if parts.count > 3, isDate(parts.suffix(3)) {
+                parts.removeLast(3)
+            } else if let last = parts.last, (last.count == 8 && last.allSatisfy(\.isNumber)) || last == "latest" || efforts.contains(last) {
+                parts.removeLast()
+            } else {
+                break
+            }
+        }
         guard !parts.isEmpty else { return id }
 
         if let familyIndex = parts.firstIndex(where: { claudeFamilies.contains($0) }) {
@@ -52,6 +60,13 @@ public enum ModelName {
             }
         }
         return generic(parts)
+    }
+
+    /// `2025`, `08`, `07`: a date written with dashes.
+    private static func isDate(_ parts: ArraySlice<String>) -> Bool {
+        let parts = Array(parts)
+        return parts[0].count == 4 && parts[0].hasPrefix("20") && parts[1].count == 2 && parts[2].count == 2
+            && parts.allSatisfy { $0.allSatisfy(\.isNumber) }
     }
 
     private static func isVersion(_ part: String) -> Bool {
