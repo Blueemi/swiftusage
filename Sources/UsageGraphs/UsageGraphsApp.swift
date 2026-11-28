@@ -193,9 +193,9 @@ struct MenuBarContent {
     var text: [String] { [tokens, cost].compactMap { $0 } }
 
     /// As saved by Customize.
-    init(store: UsageStore, limits: LimitsStore, defaults: UserDefaults = .standard) {
+    init(store: UsageStore, limits: LimitsStore, defaults: UserDefaults = .standard, showsLeft: Bool? = nil) {
         self.init(store: store, limits: limits, showTokens: defaults.object(forKey: "showTokensInMenuBar") as? Bool ?? true,
-                  showCost: defaults.bool(forKey: "showCostInMenuBar"), showsLeft: defaults.bool(forKey: "menuBarShowsLeft"))
+                  showCost: defaults.bool(forKey: "showCostInMenuBar"), showsLeft: showsLeft ?? defaults.bool(forKey: "menuBarShowsLeft"))
     }
 
     /// One account's pinned limits, which share its logo.
@@ -223,11 +223,9 @@ struct MenuBarContent {
         showsLeft ? 1 - meter.fraction : meter.fraction
     }
 
-    /// A limit's number in the menu bar. Used is rounded down like the panel's percentages, and left is
-    /// rounded down too, so neither promises more than there is. The nudge keeps 0.58 × 100 from reading 57.
+    /// A limit's number in the menu bar, matching the panel's rounding.
     func percent(_ meter: LimitMeter) -> Int {
-        let used = meter.fraction * 100
-        return showsLeft ? max(0, 100 - Int((used - 1e-6).rounded(.up))) : Int((used + 1e-6).rounded(.down))
+        LimitText.percent(meter, remaining: showsLeft)
     }
 
     /// `58%`, a limit as the menu bar and Customize's preview of it show it.

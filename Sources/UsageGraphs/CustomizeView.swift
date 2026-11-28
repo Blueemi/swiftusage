@@ -181,12 +181,13 @@ private struct AccountRow: View {
 private struct MenuBarPage: View {
     @Environment(UsageStore.self) private var store
     @Environment(LimitsStore.self) private var limits
+    @Environment(Preferences.self) private var preferences
     @Environment(PanelState.self) private var state
     @AppStorage("showTokensInMenuBar") private var showTokens = true
     @AppStorage("showCostInMenuBar") private var showCost = false
-    @AppStorage("menuBarShowsLeft") private var showsLeft = false
 
     var body: some View {
+        let showsLeft = preferences.showsRemaining
         let content = MenuBarContent(store: store, limits: limits, showTokens: showTokens, showCost: showCost, showsLeft: showsLeft)
         VStack(spacing: Theme.Layout.spacing) {
             MenuBarPreview(content: content, onReorder: limits.orderPins(byAccount:))
@@ -208,8 +209,8 @@ private struct MenuBarPage: View {
                         .rotation3DEffect(.degrees(showCost && !Theme.Motion.reduced ? 360 : 0), axis: (x: 0, y: 1, z: 0))
                 }
                 ToggleTile(title: "Remaining", detail: remaining(content), isOn: showsLeft,
-                           help: "Show what's left of each limit instead of what's used") {
-                    withAnimation(Theme.Motion.toggle) { showsLeft.toggle() }
+                           help: "Show what's left of each limit instead of what's used, in both the panel and the menu bar") {
+                    withAnimation(Theme.Motion.toggle) { preferences.showsRemaining.toggle() }
                 } glyph: {
                     Image(systemName: "hourglass").font(.system(size: 15, weight: .semibold))
                         // Turned over to count what's left.
@@ -268,6 +269,7 @@ private struct MenuBarPage: View {
 
     /// What the first pinned limit would read, so the tile shows its effect.
     private func remaining(_ content: MenuBarContent) -> String {
+        let showsLeft = preferences.showsRemaining
         guard let meter = content.pinned.first?.meter else { return showsLeft ? "Shows what's left" : "Shows what's used" }
         return "\(content.percent(meter))% " + (showsLeft ? "left" : "used")
     }
@@ -553,6 +555,8 @@ private struct GeneralPage: View {
         VStack(alignment: .leading, spacing: 14) {
             interval
             Divider()
+            limitStyle
+            Divider()
             SettingSwitch("Open at Login", detail: LoginItem.shared.problem ?? "Starts SwiftUsage with your Mac, in the menu bar.",
                           isOn: Binding(get: { LoginItem.shared.isEnabled }, set: { enabled in withAnimation(Theme.Motion.toggle) { LoginItem.shared.set(enabled) } }))
             Divider()
@@ -605,6 +609,36 @@ private struct GeneralPage: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Whether limits throughout the panel and menu bar show what's used or what's left.
+    private var limitStyle: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Show limits as")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Applies to both the Limits tab and the menu bar.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                ChoicePill(title: "Used", selected: !preferences.showsRemaining) {
+                    withAnimation(Theme.Motion.toggle) { preferences.showsRemaining = false }
+                }
+                ChoicePill(title: "Remaining", selected: preferences.showsRemaining) {
+                    withAnimation(Theme.Motion.toggle) { preferences.showsRemaining = true }
+                }
+            }
+            .accessibilityRepresentation {
+                Picker("Show limits as", selection: Binding(get: { preferences.showsRemaining }, set: { preferences.showsRemaining = $0 })) {
+                    Text("Used").tag(false)
+                    Text("Remaining").tag(true)
+                }
+                .pickerStyle(.segmented)
+            }
         }
     }
 

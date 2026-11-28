@@ -26,6 +26,15 @@ final class Preferences {
         }
     }
 
+    /// Whether limits throughout the panel and menu bar show what's left instead of what's used.
+    /// Keeps the original `"menuBarShowsLeft"` defaults key so existing settings carry over.
+    var showsRemaining: Bool {
+        didSet {
+            guard showsRemaining != oldValue else { return }
+            UserDefaults.standard.set(showsRemaining, forKey: "menuBarShowsLeft")
+        }
+    }
+
     /// The intervals Customize offers, and the default of five minutes.
     static let limitsIntervals: [TimeInterval] = [60, 120, 300, 900, 1800, 3600]
     static let defaultLimitsInterval: TimeInterval = 300
@@ -40,6 +49,7 @@ final class Preferences {
         hiddenProviders = Set((defaults.stringArray(forKey: "hiddenProviders") ?? []).compactMap(Provider.init(rawValue:)))
         let interval = defaults.double(forKey: "limitsInterval")
         limitsInterval = Self.limitsIntervals.contains(interval) ? interval : Self.defaultLimitsInterval
+        showsRemaining = defaults.bool(forKey: "menuBarShowsLeft")
     }
 
     /// In the picker's order.

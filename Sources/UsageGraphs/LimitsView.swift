@@ -160,18 +160,23 @@ struct PlanBadge: View {
     }
 }
 
-/// A limit's name, a bar colored by its pace, how much is used and when it resets.
+/// A limit's name, a bar colored by its pace, how much is used (or left) and when it resets.
 private struct MeterRow: View {
     let account: AccountLimits
     let meter: LimitMeter
     let usedWidth: CGFloat
     @Environment(LimitsStore.self) private var limits
+    @Environment(Preferences.self) private var preferences
     @Environment(PanelState.self) private var state
     @State private var hovering = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let pace = Pace(meter, now: context.date)
+            let remaining = preferences.showsRemaining
+            let fraction = remaining ? 1 - meter.fraction : meter.fraction
+            let even = pace.verdict == .fine ? nil : pace.even.map { remaining ? 1 - $0 : $0 }
+            let amount = LimitText.amount(meter, remaining: remaining)
             HStack(spacing: 10) {
                 HStack(spacing: 4) {
                     Text(meter.label)
@@ -185,15 +190,15 @@ private struct MeterRow: View {
                 }
                 .font(.system(size: 12.5, weight: .semibold))
                 .frame(width: 112, alignment: .leading)
-                MeterBar(fraction: meter.fraction, even: pace.verdict == .fine ? nil : pace.even, color: Theme.paceColor(pace.verdict))
+                MeterBar(fraction: fraction, even: even, color: Theme.paceColor(pace.verdict))
                     .frame(height: 6)
-                Text(LimitText.used(meter))
+                Text(amount)
                     .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                     // One line in a row 20 points high: a longer amount shrinks a little rather than wrapping.
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .contentTransition(.numericText(countsDown: true))
-                    .animation(Theme.Motion.roll, value: LimitText.used(meter))
+                    .contentTransition(.numericText(value: fraction))
+                    .animation(Theme.Motion.roll, value: amount)
                     .frame(width: usedWidth, alignment: .trailing)
                 Text(LimitText.reset(meter, now: context.date))
                     .font(.system(size: 11.5))
@@ -205,10 +210,10 @@ private struct MeterRow: View {
             .frame(height: 20)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(meter.label)
-            .accessibilityValue(LimitText.facts(meter, pace: pace, now: context.date).joined(separator: ", ")
+            .accessibilityValue(LimitText.facts(meter, pace: pace, now: context.date, remaining: remaining).joined(separator: ", ")
                                 + (limits.isPinned(account, meter) ? ", shown in the menu bar" : ""))
             .onChange(of: hovering) { _, inside in
-                state.chartHover = inside ? LimitText.details(meter, pace: pace, now: context.date) : nil
+                state.chartHover = inside ? LimitText.details(meter, pace: pace, now: context.date, remaining: remaining) : nil
             }
         }
         .contentShape(Rectangle())
@@ -348,15 +353,29 @@ private struct MeterBar: View {
 
 /// How limits read in the panel, the caption and the menu bar.
 enum LimitText {
+    /// Whole percentage used or left. Used is rounded down, and left is rounded down too, so neither
+    /// promises more than there is. The nudge keeps `0.58 * 100` from reading `57`.
+    static func percent(_ meter: LimitMeter, remaining: Bool = false) -> Int {
+        let used = meter.fraction * 100
+        return remaining ? max(0, 100 - Int((used - 1e-6).rounded(.up))) : Int((used + 1e-6).rounded(.down))
+    }
+
     /// `67%`, `$3/$250` for a dollar limit, or `120/500` for an allowance of requests (`12.3K/100K` once
-    /// the allowance is too long for the column; the caption has the whole numbers).
-    static func used(_ meter: LimitMeter) -> String {
+    /// the allowance is too long for the column; the caption has the whole numbers). When `remaining` is
+    /// true, shows what's left instead of what's used (`33%`, `$247/$250`, `380/500`).
+    static func amount(_ meter: LimitMeter, remaining: Bool = false) -> String {
+        let value = remaining ? max(meter.limit - meter.used, 0) : meter.used
         switch meter.unit {
-        case .percent: String(format: "%.0f%%", meter.used.rounded(.down))
-        case .dollars: compactDollars(meter.used) + "/" + compactDollars(meter.limit)
-        case .count where meter.limit >= 10_000: compactCount(meter.used) + "/" + compactCount(meter.limit)
-        case .count: Format.grouped(Int(saturating: meter.used)) + "/" + Format.grouped(Int(saturating: meter.limit))
+        case .percent: return "\(percent(meter, remaining: remaining))%"
+        case .dollars: return compactDollars(value) + "/" + compactDollars(meter.limit)
+        case .count where meter.limit >= 10_000: return compactCount(value) + "/" + compactCount(meter.limit)
+        case .count: return Format.grouped(Int(saturating: value)) + "/" + Format.grouped(Int(saturating: meter.limit))
         }
+    }
+
+    /// `67%`, `$3/$250`, or `120/500` used.
+    static func used(_ meter: LimitMeter) -> String {
+        amount(meter, remaining: false)
     }
 
     /// `Resets in 3h 25m`, or `Not started` for a session that begins with the next message.
@@ -365,19 +384,21 @@ enum LimitText {
         return "Resets in " + countdown(reset.timeIntervalSince(now))
     }
 
-    /// The caption for a limit under the pointer: what's used, when it resets and where the pace leads.
-    static func details(_ meter: LimitMeter, pace: Pace, now: Date = Date()) -> String {
-        ([meter.label] + facts(meter, pace: pace, now: now)).joined(separator: " · ")
+    /// The caption for a limit under the pointer: what's used (or left), when it resets and where the pace leads.
+    static func details(_ meter: LimitMeter, pace: Pace, now: Date = Date(), remaining: Bool = false) -> String {
+        ([meter.label] + facts(meter, pace: pace, now: now, remaining: remaining)).joined(separator: " · ")
     }
 
     /// What `details` says after the limit's name, which VoiceOver reads as the row's value.
-    static func facts(_ meter: LimitMeter, pace: Pace, now: Date = Date()) -> [String] {
+    static func facts(_ meter: LimitMeter, pace: Pace, now: Date = Date(), remaining: Bool = false) -> [String] {
         var parts: [String] = []
+        let value = remaining ? max(meter.limit - meter.used, 0) : meter.used
+        let verb = remaining ? "left" : "used"
         switch meter.unit {
         // Rounded down, as in the row beside it.
-        case .percent: parts.append(String(format: "%.0f%% used", meter.used.rounded(.down)))
-        case .dollars: parts.append("\(compactDollars(meter.used)) of \(compactDollars(meter.limit)) used")
-        case .count: parts.append("\(Format.grouped(Int(saturating: meter.used))) of \(Format.grouped(Int(saturating: meter.limit))) used")
+        case .percent: parts.append("\(percent(meter, remaining: remaining))% \(verb)")
+        case .dollars: parts.append("\(compactDollars(value)) of \(compactDollars(meter.limit)) \(verb)")
+        case .count: parts.append("\(Format.grouped(Int(saturating: value))) of \(Format.grouped(Int(saturating: meter.limit))) \(verb)")
         }
         if let reset = meter.resetsAt {
             parts.append("resets " + reset.formatted(Calendar.current.isDate(reset, inSameDayAs: now) ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()))
@@ -392,7 +413,14 @@ enum LimitText {
                 parts.append("on pace to hit the limit")
             }
         case .tight, .fine:
-            if let atReset = pace.atReset { parts.append(String(format: "on pace for ~%.0f%% by then", min(atReset, 1) * 100)) }
+            if let atReset = pace.atReset {
+                if remaining {
+                    let leftAtReset = max(0, Int(((1 - min(atReset, 1)) * 100).rounded()))
+                    parts.append("on pace for ~\(leftAtReset)% left by then")
+                } else {
+                    parts.append(String(format: "on pace for ~%.0f%% by then", min(atReset, 1) * 100))
+                }
+            }
         }
         return parts
     }

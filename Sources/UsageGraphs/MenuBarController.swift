@@ -116,7 +116,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
 
     /// Today's tokens and cost, then any pinned limits; the icon only when there's none of them.
     private func updateTitle() {
-        let content = MenuBarContent(store: store, limits: limits)
+        let content = MenuBarContent(store: store, limits: limits, showsLeft: preferences.showsRemaining)
         guard let button = statusItem.button else { return }
         if content.pinned.isEmpty {
             button.image = content.text.isEmpty ? MenuBarIcon.image : nil
